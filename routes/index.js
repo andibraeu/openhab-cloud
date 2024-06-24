@@ -1,4 +1,4 @@
-var system = require('../system'),
+const system = require('../system'),
     homepage = require('./homepage'),
     health_routes = require('./health'),
     passport = require('passport'),
@@ -14,7 +14,7 @@ var system = require('../system'),
     api_routes = require('./api'),
     oauth2 = require('./oauth2'),
     setSessionTimezone = require('./setTimezone'),
-    androidRegistrationService = require('./androidRegistrationService'),
+    fcmRegistrationService = require('./fcmRegistrationService'),
     appleRegistrationService = require('./appleRegistrationService'),
     ifttt_routes = require('./ifttt'),
     redis = require('../redis-helper');
@@ -25,7 +25,7 @@ var system = require('../system'),
  * @param {logger} logger
  * @constructor
  */
-var Routes = function (logger) {
+const Routes = function (logger) {
     this.logger = logger;
 };
 
@@ -80,14 +80,8 @@ Routes.prototype.setupLoginLogoutRoutes = function (app) {
     });
 
     app.get('/login', function (req, res) {
-        var errormessages = req.flash('error'),
-            invitationCode;
-
-        if (req.query['invitationCode'] !== null) {
-            invitationCode = req.query['invitationCode'];
-        } else {
-            invitationCode = '';
-        }
+        const errormessages = req.flash('error');
+        const invitationCode = req.query['invitationCode'] !== null ? req.query['invitationCode'] : '';
 
         res.render('login', {
             title: 'Log in',
@@ -136,7 +130,7 @@ Routes.prototype.setupApplicationsRoutes = function (app) {
 };
 
 Routes.prototype.setupNewUserRegistrationRoutes = function (app) {
-    var registerPostValidate = account_routes.registerpostvalidateall;
+    let registerPostValidate = account_routes.registerpostvalidateall;
 
     if (!system.hasLegalTerms() && !system.hasLegalPolicy()) {
         registerPostValidate = account_routes.registerpostvalidate;
@@ -231,12 +225,20 @@ Routes.prototype.setupProxyRoutes = function (app) {
 
 Routes.prototype.setupAppRoutes = function (app) {
     // myOH API for mobile apps
-    app.all('/api/v1/notifications*', this.ensureRestAuthenticated, this.setOpenhab, this.preassembleBody, api_routes.notificationsget);
-    app.all('/api/v1/settings/notifications', this.ensureRestAuthenticated, this.setOpenhab, this.preassembleBody, api_routes.notificationssettingsget);
+    app.get('/api/v1/notifications', this.ensureRestAuthenticated, this.setOpenhab, this.preassembleBody, api_routes.notificationsget);
+    app.get('/api/v1/hidenotification/:id', this.ensureRestAuthenticated, this.setOpenhab, this.preassembleBody, api_routes.hidenotification);
+    app.get('/api/v1/settings/notifications', this.ensureRestAuthenticated, this.setOpenhab, this.preassembleBody, api_routes.notificationssettingsget);
+    app.get('/api/v1/proxyurl', this.ensureRestAuthenticated, this.setOpenhab, this.preassembleBody, api_routes.proxyurlget);
+    // Do not require authentication for this route
+    app.get('/api/v1/appids', api_routes.appids);
 
-    // Android app registration
-    app.all('/addAndroidRegistration*', this.ensureRestAuthenticated, this.setOpenhab, this.preassembleBody, androidRegistrationService);
+    // Android app registration (FCM)
+    app.all('/addAndroidRegistration*', this.ensureRestAuthenticated, this.setOpenhab, this.preassembleBody, fcmRegistrationService.registerAndroid);
+    // Apple app registration (FCM)
+    app.all('/addIosRegistration*', this.ensureRestAuthenticated, this.setOpenhab, this.preassembleBody, fcmRegistrationService.registerIos);
+    // Apple app registration (legacy)
     app.all('/addAppleRegistration*', this.ensureRestAuthenticated, this.setOpenhab, this.preassembleBody, appleRegistrationService);
+    
 };
 
 // Ensure user is authenticated for web requests
@@ -297,7 +299,7 @@ Routes.prototype.ensureServer = function (req, res, next) {
 };
 
 Routes.prototype.setOpenhab = function (req, res, next) {
-    var self = this;
+    const self = this;
 
     //ignore if no authentication
     if (!req.isAuthenticated()) {
@@ -354,7 +356,7 @@ Routes.prototype.preassembleBody = function (req, res, next) {
     //app.js will catch any JSON or URLEncoded related requests and
     //store the rawBody on the request, all other requests need
     //to have that data collected and stored here
-    var data = '';
+    let data = '';
     if (req.rawBody === undefined || req.rawBody === "") {
         req.on('data', function (chunk) {
             data += chunk;
@@ -370,7 +372,7 @@ Routes.prototype.preassembleBody = function (req, res, next) {
 };
 
 Routes.prototype.proxyRouteOpenhab = function (req, res) {
-    var self = this;
+    const self = this;
 
     this.logger.auditRequest(req);
     req.connection.setTimeout(600000);
@@ -378,9 +380,9 @@ Routes.prototype.proxyRouteOpenhab = function (req, res) {
     //tell OH3 to use alternative Authentication header
     res.cookie('X-OPENHAB-AUTH-HEADER', 'true')
 
-    var requestId = this.requestTracker.acquireRequestId();
+    const requestId = this.requestTracker.acquireRequestId();
     // make a local copy of request headers to modify
-    var requestHeaders = req.headers;
+    const requestHeaders = req.headers;
     // We need to remove and modify some headers here
     delete requestHeaders['cookie'];
     delete requestHeaders['cookie2'];
@@ -392,12 +394,12 @@ Routes.prototype.proxyRouteOpenhab = function (req, res) {
     requestHeaders['host'] = req.headers.host || system.getHost() + ':' + system.getPort();
     requestHeaders['user-agent'] = 'openhab-cloud/0.0.1';
     // Strip off path prefix for remote vhosts hack
-    var requestPath = req.path;
+    let requestPath = req.path;
     if (requestPath.indexOf('/remote/') === 0) {
         requestPath = requestPath.replace('/remote', '');
         // TODO: this is too dirty :-(
         delete requestHeaders['host'];
-        requestHeaders['host'] = 'home.' + system.getHost() + ':' + system.getPort();
+        requestHeaders['host'] = system.getProxyHost() + ':' + system.getProxyPort();
     }
 
     // Send a message with request to openhab agent module
